@@ -1,0 +1,9 @@
+build/
+build-assets/
+.vs/
+vcpkg_installed/
+CMakeUserPresets.json
+*.dll
+*.pdb
+*.zip
+__pycache__/
