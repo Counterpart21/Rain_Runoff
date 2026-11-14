@@ -1,0 +1,32 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-release",
+      "displayName": "Windows x64 SKSE plugin",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
+        "RUNOFF_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "core-tests",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/core",
+      "cacheVariables": {"RUNOFF_BUILD_PLUGIN": "OFF", "BUILD_TESTING": "ON", "CMAKE_BUILD_TYPE": "Debug"}
+    }
+  ],
+  "buildPresets": [
+    {"name": "windows-release", "configurePreset": "windows-release", "configuration": "Release"},
+    {"name": "core-tests", "configurePreset": "core-tests"}
+  ],
+  "testPresets": [
+    {"name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": {"outputOnFailure": true}},
+    {"name": "core-tests", "configurePreset": "core-tests", "output": {"outputOnFailure": true}}
+  ]
+}

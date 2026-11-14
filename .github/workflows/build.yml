@@ -1,0 +1,53 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE']
+  pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE']
+  workflow_dispatch:
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake --preset core-tests
+      - run: cmake --build --preset core-tests
+      - run: ctest --preset core-tests
+  windows-core:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build/windows-core -G "Visual Studio 17 2022" -A x64 -DRUNOFF_BUILD_PLUGIN=OFF -DBUILD_TESTING=ON
+      - run: cmake --build build/windows-core --config Release --parallel 2
+      - run: ctest --test-dir build/windows-core -C Release --output-on-failure
+  plugin:
+    needs: [core, windows-core]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pinned vcpkg
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'runoff-vcpkg'
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git $root
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C $root checkout 4702e381dbbd9b54d3f7e1eb565cd8981c1814cd
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+      - run: cmake --preset windows-release
+      - run: cmake --build --preset windows-release --parallel 2
+      - run: ctest --preset windows-release
+      - run: cmake --install build/windows --config Release --component Runtime --prefix build/package/Data
+      - name: Add documentation
+        shell: pwsh
+        run: Copy-Item README.md,LICENSE,VALIDATION.md build/package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RainRunoff-experimental
+          path: build/package/
