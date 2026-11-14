@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <vector>
 
 namespace
@@ -45,12 +46,38 @@ namespace
         }
         return result;
     }
+    void expectSamePair(const std::optional<runoff::RoofPair>& actual, const runoff::RoofPair& expected,
+                        float angle, int segments, int permutation)
+    {
+        ++checks;
+        bool same = actual.has_value();
+        for (std::size_t i = 0; same && i < expected.size(); ++i) {
+            const auto& a = (*actual)[i];
+            const auto& b = expected[i];
+            same = near(a.position.x, b.position.x) && near(a.position.y, b.position.y) && near(a.position.z, b.position.z) &&
+                   near(a.outward.x, b.outward.x) && near(a.outward.y, b.outward.y) && near(a.outward.z, b.outward.z);
+        }
+        if (!same) {
+            std::cerr << "FAIL: eave/endpoint selection changed after permutation; angle=" << angle
+                      << " segments=" << segments << " permutation=" << permutation << '\n';
+            if (actual) {
+                for (std::size_t i = 0; i < expected.size(); ++i) {
+                    std::cerr << "  endpoint " << i << " actual=" << (*actual)[i].position.x << ',' << (*actual)[i].position.y
+                              << ',' << (*actual)[i].position.z << " expected=" << expected[i].position.x << ','
+                              << expected[i].position.y << ',' << expected[i].position.z << '\n';
+                }
+            }
+            std::exit(1);
+        }
+    }
 }
 
 int main()
 {
     using namespace runoff;
-    for (const auto angle : {0.0F, 0.37F, 1.5707963F, 2.31F}) {
+    std::mt19937 shuffle(137);
+    for (const auto angle : {0.0F, 0.37F, 1.5707953F, 1.5707963F, 1.5707973F, 2.31F,
+                             3.1415916F, 3.1415927F, 3.1415937F, 4.7123880F, 4.7123890F, 4.7123900F}) {
         for (const int segments : {1, 2, 8, 32}) {
             auto roof = gable(angle, segments);
             auto corners = detectCorners(roof);
@@ -66,7 +93,18 @@ int main()
             const auto previous = *corners;
             std::reverse(roof.begin(), roof.end());
             corners = detectCorners(roof);
-            expect(corners && near((*corners)[0].position.x, previous[0].position.x, 0.05F) && near((*corners)[0].position.y, previous[0].position.y, 0.05F), "triangle iteration order does not change selected eave");
+            expectSamePair(corners, previous, angle, segments, -1);
+            for (int permutation = 0; permutation < 16; ++permutation) {
+                std::shuffle(roof.begin(), roof.end(), shuffle);
+                for (std::size_t i = 0; i < roof.size(); ++i) {
+                    auto& t = roof[i];
+                    // Change each triangle's starting index while preserving
+                    // winding, as equivalent NIF index buffers commonly do.
+                    if ((i + static_cast<std::size_t>(permutation)) % 3 == 1) t = {t.b, t.c, t.a};
+                    else if ((i + static_cast<std::size_t>(permutation)) % 3 == 2) t = {t.c, t.a, t.b};
+                }
+                expectSamePair(detectCorners(roof), previous, angle, segments, permutation);
+            }
         }
     }
     const std::vector<Triangle> table{{{0,0,0},{50,0,0},{50,50,0}}, {{0,0,0},{50,50,0},{0,50,0}}};

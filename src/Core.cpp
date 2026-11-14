@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -34,6 +35,10 @@ namespace runoff
         {
             std::int64_t x, y, z;
             bool operator==(const Key&) const = default;
+            bool operator<(const Key& other) const noexcept
+            {
+                return std::tie(x, y, z) < std::tie(other.x, other.y, other.z);
+            }
         };
         struct KeyHash
         {
@@ -101,28 +106,55 @@ namespace runoff
             !std::isfinite(cfg.maxEaveSlope) || cfg.maxEaveSlope < 0 ||
             !std::isfinite(cfg.cornerOutset) || cfg.cornerOutset < 0) return std::nullopt;
 
-        std::vector<Vec3> points;
-        std::unordered_map<Key, std::size_t, KeyHash> welded;
-        std::unordered_map<EdgeKey, Edge, EdgeHash> edges;
-        Vec3 minimum{INFINITY, INFINITY, INFINITY};
-        Vec3 maximum{-INFINITY, -INFINITY, -INFINITY};
-        Vec3 weightedCenter{};
-        double totalArea = 0;
-        const auto indexFor = [&](Vec3 point) -> std::size_t {
-            const Key key{std::llround(point.x / cfg.weldTolerance),
-                          std::llround(point.y / cfg.weldTolerance),
-                          std::llround(point.z / cfg.weldTolerance)};
-            const auto [iter, inserted] = welded.try_emplace(key, points.size());
-            if (inserted) points.push_back(point);
-            return iter->second;
+        const auto keyFor = [&](Vec3 point) -> Key {
+            return {std::llround(static_cast<double>(point.x) / cfg.weldTolerance),
+                    std::llround(static_cast<double>(point.y) / cfg.weldTolerance),
+                    std::llround(static_cast<double>(point.z) / cfg.weldTolerance)};
         };
-
-        for (const auto& tri : triangles) {
+        // Exact comparisons make this a strict order, including coordinates
+        // falling into the same weld cell. Never use an epsilon in std::sort.
+        const auto pointBefore = [&](Vec3 a, Vec3 b) {
+            const auto ak = keyFor(a), bk = keyFor(b);
+            return ak == bk ? std::tie(a.x, a.y, a.z) < std::tie(b.x, b.y, b.z) : ak < bk;
+        };
+        std::vector<Triangle> ordered;
+        ordered.reserve(triangles.size());
+        for (auto tri : triangles) {
             if (!finite(tri.a) || !finite(tri.b) || !finite(tri.c)) continue;
             // Protect quantization and cross products from corrupt mesh coordinates.
             if (std::max({std::abs(tri.a.x), std::abs(tri.a.y), std::abs(tri.a.z),
                           std::abs(tri.b.x), std::abs(tri.b.y), std::abs(tri.b.z),
                           std::abs(tri.c.x), std::abs(tri.c.y), std::abs(tri.c.z)}) > 1.0e8F) continue;
+            // A cyclic permutation preserves winding and fixes the arithmetic
+            // order even when a NIF stores the same triangle with another start.
+            if (pointBefore(tri.b, tri.a) && pointBefore(tri.b, tri.c))
+                tri = {tri.b, tri.c, tri.a};
+            else if (pointBefore(tri.c, tri.a) && pointBefore(tri.c, tri.b))
+                tri = {tri.c, tri.a, tri.b};
+            ordered.push_back(tri);
+        }
+        std::sort(ordered.begin(), ordered.end(), [&](const Triangle& a, const Triangle& b) {
+            for (const auto& [ap, bp] : {std::pair{a.a, b.a}, std::pair{a.b, b.b}, std::pair{a.c, b.c}}) {
+                if (pointBefore(ap, bp)) return true;
+                if (pointBefore(bp, ap)) return false;
+            }
+            return false;
+        });
+
+        std::vector<Vec3> points;
+        std::unordered_map<Key, std::size_t, KeyHash> welded;
+        std::unordered_map<EdgeKey, Edge, EdgeHash> edges;
+        Vec3 minimum{INFINITY, INFINITY, INFINITY};
+        Vec3 maximum{-INFINITY, -INFINITY, -INFINITY};
+        double centerX = 0, centerY = 0, centerZ = 0;
+        double totalArea = 0;
+        const auto indexFor = [&](Vec3 point) -> std::size_t {
+            const auto [iter, inserted] = welded.try_emplace(keyFor(point), points.size());
+            if (inserted) points.push_back(point);
+            return iter->second;
+        };
+
+        for (const auto& tri : ordered) {
             const auto normal = cross(sub(tri.b, tri.a), sub(tri.c, tri.a));
             const auto area2 = std::sqrt(dot(normal, normal));
             if (!std::isfinite(area2) || area2 < epsilon || normal.z / area2 < cfg.minNormalZ) continue;
@@ -136,7 +168,9 @@ namespace runoff
                 maximum.y = std::max(maximum.y, p.y);
                 maximum.z = std::max(maximum.z, p.z);
             }
-            weightedCenter = add(weightedCenter, mul(add(add(tri.a, tri.b), tri.c), area2 / 3.0F));
+            centerX += (static_cast<double>(tri.a.x) + tri.b.x + tri.c.x) * area2 / 3.0;
+            centerY += (static_cast<double>(tri.a.y) + tri.b.y + tri.c.y) * area2 / 3.0;
+            centerZ += (static_cast<double>(tri.a.z) + tri.b.z + tri.c.z) * area2 / 3.0;
             totalArea += area2;
             for (std::size_t i = 0; i < 3; ++i) {
                 auto a = indices[i], b = indices[(i + 1) % 3];
@@ -147,11 +181,12 @@ namespace runoff
                 it->second.sloped = it->second.sloped || sloped;
             }
         }
-        if (totalArea < epsilon || !finite(weightedCenter) ||
+        if (totalArea < epsilon || !std::isfinite(centerX) || !std::isfinite(centerY) || !std::isfinite(centerZ) ||
             maximum.x - minimum.x < cfg.minFootprint ||
             maximum.y - minimum.y < cfg.minFootprint ||
             maximum.z - minimum.z > cfg.maxHeightSpan) return std::nullopt;
-        const auto center = mul(weightedCenter, static_cast<float>(1.0 / totalArea));
+        const Vec3 center{static_cast<float>(centerX / totalArea), static_cast<float>(centerY / totalArea),
+                          static_cast<float>(centerZ / totalArea)};
 
         std::vector<Edge> boundary;
         std::vector<Vec3> directions;
@@ -161,8 +196,17 @@ namespace runoff
             const auto delta = sub(points[edge.b], points[edge.a]);
             const auto span = xyLength(delta);
             if (span < epsilon || std::abs(delta.z) / span > cfg.maxEaveSlope) continue;
-            const auto id = boundary.size();
             boundary.push_back(edge);
+        }
+        // IDs come from the canonical triangle traversal, so this removes the
+        // implementation-dependent traversal order of unordered_map as well.
+        std::sort(boundary.begin(), boundary.end(), [](const Edge& a, const Edge& b) {
+            return std::tie(a.a, a.b) < std::tie(b.a, b.b);
+        });
+        for (std::size_t id = 0; id < boundary.size(); ++id) {
+            const auto& edge = boundary[id];
+            const auto delta = sub(points[edge.b], points[edge.a]);
+            const auto span = xyLength(delta);
             directions.push_back({delta.x / span, delta.y / span, 0});
             incident[edge.a].push_back(id);
             incident[edge.b].push_back(id);
@@ -181,7 +225,7 @@ namespace runoff
         {
             bool populated = false;
             Vec3 origin{}, dir{}, first{}, last{};
-            float low{}, high{};
+            double low{}, high{}, score{};
             bool sloped = false;
         };
         std::vector<Line> lines(boundary.size());
@@ -195,39 +239,51 @@ namespace runoff
             }
             line.sloped = line.sloped || boundary[i].sloped;
             for (auto p : {points[boundary[i].a], points[boundary[i].b]}) {
-                const auto projection = dot(sub(p, line.origin), line.dir);
+                const auto projection = (static_cast<double>(p.x) - line.origin.x) * line.dir.x +
+                                        (static_cast<double>(p.y) - line.origin.y) * line.dir.y;
                 if (projection < line.low) { line.low = projection; line.first = p; }
                 if (projection > line.high) { line.high = projection; line.last = p; }
             }
         }
         const Line* selected = nullptr;
-        float bestScore = -1;
-        for (const auto& line : lines) {
+        double bestScore = -1;
+        for (auto& line : lines) {
             if (!line.populated) continue;
-            const auto span = line.high - line.low;
+            const auto span = std::hypot(static_cast<double>(line.last.x) - line.first.x,
+                                         static_cast<double>(line.last.y) - line.first.y);
             if (span < cfg.minEaveSpan) continue;
             // The score favors eaves of sloped roofs over horizontal decks.
             // A ridge open at a material seam gets a penalty for elevation.
-            const auto midpoint = mul(add(line.first, line.last), 0.5F);
-            const auto relief = maximum.z - minimum.z;
-            const auto lowEave = relief > epsilon ? std::clamp((maximum.z - midpoint.z) / relief, 0.0F, 1.0F) : 0.0F;
-            const auto score = span * (line.sloped ? 2.0F : 1.0F) * (1.0F + 0.5F * lowEave);
-            // Deterministic tie-break independent of unordered_map iteration.
-            const auto tie = selected ? mul(add(selected->first, selected->last), 0.5F) : Vec3{};
-            const bool earlier = !selected || midpoint.x < tie.x - epsilon ||
-                (std::abs(midpoint.x - tie.x) <= epsilon && midpoint.y < tie.y - epsilon);
-            if (score > bestScore + epsilon || (std::abs(score - bestScore) <= epsilon && earlier)) {
-                selected = &line;
-                bestScore = score;
-            }
+            const auto midpointZ = (static_cast<double>(line.first.z) + line.last.z) * 0.5;
+            const auto relief = static_cast<double>(maximum.z) - minimum.z;
+            const auto lowEave = relief > epsilon ? std::clamp((maximum.z - midpointZ) / relief, 0.0, 1.0) : 0.0;
+            line.score = span * (line.sloped ? 2.0 : 1.0) * (1.0 + 0.5 * lowEave);
+            bestScore = std::max(bestScore, line.score);
+        }
+        // Differences below the weld resolution do not indicate a meaningfully
+        // longer eave. Find the global maximum first, then choose the earliest
+        // spatial key among tied candidates. A pairwise epsilon comparator can
+        // be nontransitive and used to depend on unordered traversal.
+        const auto scoreTolerance = std::max(static_cast<double>(cfg.weldTolerance) * 0.5, bestScore * 1.0e-6);
+        const auto lineKey = [&](const Line& line) {
+            const auto mid = keyFor(mul(add(line.first, line.last), 0.5F));
+            auto first = keyFor(line.first), last = keyFor(line.last);
+            if (last < first) std::swap(first, last);
+            return std::tuple{mid.x, mid.y, mid.z, first.x, first.y, first.z, last.x, last.y, last.z};
+        };
+        for (const auto& line : lines) {
+            if (!line.populated || line.score <= 0 || bestScore - line.score > scoreTolerance) continue;
+            if (!selected || lineKey(line) < lineKey(*selected)) selected = &line;
         }
         if (!selected) return std::nullopt;
         const auto mid = mul(add(selected->first, selected->last), 0.5F);
-        Vec3 outward{-selected->dir.y, selected->dir.x, 0};
+        const auto eave = sub(selected->last, selected->first);
+        const auto span = xyLength(eave);
+        Vec3 outward{-eave.y / span, eave.x / span, 0};
         if (dot(outward, sub(mid, center)) < 0) outward = mul(outward, -1.0F);
         auto first = selected->first, last = selected->last;
         // Stable endpoint order aids deterministic attachment/revalidation.
-        if (first.x > last.x || (first.x == last.x && first.y > last.y)) std::swap(first, last);
+        if (pointBefore(last, first)) std::swap(first, last);
         return RoofPair{{{add(first, mul(outward, cfg.cornerOutset)), outward},
                          {add(last, mul(outward, cfg.cornerOutset)), outward}}};
     }

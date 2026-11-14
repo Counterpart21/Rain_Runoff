@@ -3,9 +3,10 @@
 ## Performed in the Linux cloud workspace
 
 - Configured and built the portable target through the supplied CMake
-  `core-tests` preset. CTest passed its test executable, which performs 140
+  `core-tests` preset. CTest passed its test executable, which performs 1,132
   checks. Tests cover rotated/subdivided roof geometry, deterministic eave
-  selection, flat/tiny/invalid surfaces, timed ramps, rain blends, UV narrowing,
+  selection across reversed/shuffled triangles and cyclic vertex orders,
+  flat/tiny/invalid surfaces, timed ramps, rain blends, UV narrowing,
   and clearance strictly greater than player height.
 - Independently compiled core/tests with GCC C++20, strict warnings treated as
   errors, AddressSanitizer, and UndefinedBehaviorSanitizer; all checks passed.
@@ -21,10 +22,16 @@
   independent effect materials, scene cleanup, player standing-height query,
   and local-axis collision sampling.
 
+## Windows build validation
+
+- GitHub Actions has compiled and linked RainRunoff.dll with Windows MSVC.
+- The workflow runs the portable tests on both Linux and Windows Release, with
+  Windows logic tests before the full dependency/plugin build. Packaging runs
+  only after those tests pass. Use artifacts from a fully successful run.
+- DLLs are generated workflow artifacts, not committed source files.
+
 ## Not performed
 
-- No Windows MSVC compile or link of RainRunoff.dll. No DLL is included.
-- The Windows GitHub Actions workflow has not been executed.
 - No Skyrim launch, SKSE loading test, rendered visual inspection, CS integration
   test, live Havok raycast test, runtime-version compatibility test, or frame-time
   measurement. Header checks and portable tests do not establish these results.

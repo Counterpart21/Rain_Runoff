@@ -4,10 +4,17 @@ RainRunoff fakes water spilling from two roof corners during rain. It uses a
 small animated, tapered, transparent mesh rather than fluid simulation. No
 individual house meshes need editing or attachment markers.
 
-**This is a source prototype, not an install-ready DLL release.** The portable
-logic and generated asset files have been tested. The Windows plugin has not
-been compiled here or tested in Skyrim. The included Windows build workflow is
-provided for that next verification step; it has not been run for this package.
+**This is an experimental plugin, not a game-tested release.** The portable
+logic and generated assets have been checked, and the DLL has compiled and
+linked with Windows MSVC in GitHub Actions. The workflow also runs Linux and
+Windows logic tests; download a package only from a fully successful run.
+The plugin's behavior and appearance still need testing inside Skyrim.
+
+Open [GitHub Actions](https://github.com/Counterpart21/Rain_Runoff/actions),
+choose a successful **Build and test** run, and download the
+**RainRunoff-experimental** artifact at the bottom. It contains the compiled
+DLL, INI, mesh, and texture. A source ZIP from the Code button contains source
+and assets, not the generated DLL.
 
 ## Intended behavior
 
