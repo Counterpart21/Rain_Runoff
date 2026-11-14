@@ -374,8 +374,8 @@ namespace RainRunoff::Engine
             return nullptr;
         }
         auto effect = std::unique_ptr<Effect>(new Effect);
-        effect->parent_ = &parent;
-        effect->root_ = copiedRoot;
+        effect->parent_.reset(&parent);
+        effect->root_.reset(copiedRoot);
         bool valid = true;
         RE::BSVisit::TraverseScenegraphGeometries(copiedRoot, [&](RE::BSGeometry* geometry) {
             auto* property = geometry->GetGeometryRuntimeData().properties[RE::BSGeometry::States::kEffect].get();

@@ -202,7 +202,7 @@ void Runtime::Discover(RE::TESObjectREFR& ref, float height) {
     }
     Roof roof;
     roof.handle = ref.GetHandle();
-    roof.root = parent;
+    roof.root.reset(parent);
     unsigned valid = 0;
     for (std::size_t i = 0; i < pair->size(); ++i) {
         auto origin = point((*pair)[i].position);

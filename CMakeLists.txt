@@ -23,11 +23,14 @@ if(RUNOFF_BUILD_PLUGIN)
         GIT_REPOSITORY https://github.com/CharmedBaryon/CommonLibSSE-NG.git
         GIT_TAG b93280e832f263dbef44e44cbe2936622a02f91a)
     FetchContent_MakeAvailable(CommonLibSSE)
+    # MSBuild's project-level --parallel does not parallelize source files in
+    # this single large dependency. Compile up to four translation units at once.
+    target_compile_options(CommonLibSSE PRIVATE /MP4)
     add_library(RainRunoff SHARED src/Plugin.cpp src/Runtime.cpp src/Settings.cpp src/Engine.cpp)
     target_include_directories(RainRunoff PRIVATE src)
     target_compile_features(RainRunoff PRIVATE cxx_std_23)
     target_compile_definitions(RainRunoff PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_compile_options(RainRunoff PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(RainRunoff PRIVATE /W4 /permissive- /EHsc /MP4)
     target_link_libraries(RainRunoff PRIVATE runoff_core CommonLibSSE::CommonLibSSE)
     install(TARGETS RainRunoff RUNTIME DESTINATION SKSE/Plugins COMPONENT Runtime)
     install(DIRECTORY Data/ DESTINATION . COMPONENT Runtime)
